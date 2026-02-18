@@ -81,3 +81,4 @@ The software has been tested with the following package versions:
 - ipykernel==7.2.0
 - ipywidgets==8.1.8
 - scikit-learn==1.7.2
+- matplotlib==3.10.8
