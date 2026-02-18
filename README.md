@@ -48,6 +48,20 @@ To set up the project, follow these steps:
 
    Open the `demo.ipynb` notebook and run the cells using the HANNA environment to test the installation.
 
+   If you obtain output plots similar to the following, the installation was successful.
+
+   **Binary Prediction:**
+
+   <p align="center">
+     <img src="img/binary_output.png" alt="HANNA binary demo output" width="900"/>
+   </p>
+
+   **Ternary Prediction:**
+
+   <p align="center">
+     <img src="img/ternary_output.png" alt="HANNA ternary demo output" width="900"/>
+   </p>
+
 
 ## License
 
