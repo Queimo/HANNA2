@@ -10,9 +10,9 @@
   <img src="img/github_HANNA.png" alt="HANNA Overview" width="800"/>
 </p>
 
-HANNA is a machine learning model for predicting the excess Gibbs energy of the liquid phase in mixtures with an arbitrary number of components. Through automatic differentiation, HANNA derives thermodynamically consistent activity coefficients from the excess Gibbs energy. HANNA is trained to more than 300,000 binary experimental data points of vapor-liquid equilibria, infinite dilution activity coefficients and liquid-liquid equilibria. As input, only the SMILES notation and the considered state point (composition and temperature) is required. In comprehensive benchmarks, HANNA was found to yield better results than the state-of-the-art models of the UNIFAC family.
+HANNA is a machine learning model for predicting the excess Gibbs energy of the liquid phase in mixtures with an arbitrary number of components. Through automatic differentiation, HANNA derives thermodynamically consistent activity coefficients from the excess Gibbs energy. HANNA is trained to more than 800,000 experimental data points of vapor-liquid equilibria, liquid-liquid equilibria, activity coefficients at infinite dilution and excess enthalpies in binary mixtures. As input, only the SMILES notation of all molecules and the considered state point (composition and temperature) is required. In comprehensive benchmarks, HANNA was found to yield better results than the state-of-the-art models of the UNIFAC family and other ML models.
 
-**Note**: This repository is based on the HANNA prototype implementation by [tspecht93](https://github.com/tspecht93/HANNA), which was restricted to binary mixtures and not trained on liquid-liquid equilibrium data; the corresponding original paper is available [here](https://pubs.rsc.org/en/Content/ArticleLanding/2024/SC/D4SC05115G).
+**Note**: This repository is based on the HANNA prototype implementation by [tspecht93](https://github.com/tspecht93/HANNA), which was restricted to binary mixtures and not trained on liquid-liquid equilibrium data or excess enthalpies; the corresponding original paper is available [here](https://pubs.rsc.org/en/Content/ArticleLanding/2024/SC/D4SC05115G).
 
 
 ### Easy Use
@@ -42,7 +42,9 @@ To set up the project, follow these steps:
    conda env create -f environment.yml
    ```
 
-5. **Test the installation:**
+   Note: If you want to run the model on a GPU, make sure to install the PyTorch version with CUDA support.
+
+3. **Test the installation:**
 
    Open the `demo.ipynb` notebook and run the cells using the HANNA environment to test the installation.
 
@@ -50,3 +52,18 @@ To set up the project, follow these steps:
 ## License
 
 This project is licensed under the MIT License. See the LICENSE file for details.
+
+## Tested Versions
+
+The software has been tested with the following package versions:
+
+- python==3.10.19
+- pytorch==2.10.0
+- numpy==2.2.6
+- pandas==2.3.3
+- rdkit==2025.9.5
+- transformers==5.1.0
+- tokenizers==0.22.2
+- ipykernel==7.2.0
+- ipywidgets==8.1.8
+- scikit-learn==1.7.2
