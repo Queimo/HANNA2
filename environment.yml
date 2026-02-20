@@ -13,3 +13,4 @@ dependencies:
   - ipykernel
   - ipywidgets
   - scikit-learn
+  - matplotlib

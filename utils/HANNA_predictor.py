@@ -98,11 +98,11 @@ class HANNA_Predictor:
             self.t_scaler.transform(np.array([[temperature]]))
         ).to(self.device)
         return scaled_T
-    
+        
     def predict(
         self, 
         smiles_list: List[str], 
-        molar_fractions_all: Union[List[List[float]], np.ndarray], 
+        molar_fractions: Union[List[List[float]], np.ndarray, str], 
         temperature: float,
         verbose: bool = False
     ) -> tuple[np.ndarray, np.ndarray]:
@@ -110,7 +110,7 @@ class HANNA_Predictor:
         
         Args:
             smiles_list: List of SMILES strings for each component.
-            molar_fractions_all: Molar fractions for each mixture composition.
+            molar_fractions: Molar fractions for each mixture composition.
                                 Each row should sum to 1.0.
             temperature: Temperature in Kelvin.
             
@@ -120,22 +120,89 @@ class HANNA_Predictor:
         Raises:
             ValueError: If molar fractions don't sum to 1 or have invalid dimensions.
         """
+   
         # Convert to numpy array if needed
-        if isinstance(molar_fractions_all, list):
-            molar_fractions_all = np.array(molar_fractions_all)
+        if isinstance(molar_fractions, list):
+            molar_fractions = np.array(molar_fractions)
 
         # Validate molar fractions
-        if not np.allclose(np.sum(molar_fractions_all, axis=1), 1.0, rtol=1e-5):
+        if not np.allclose(np.sum(molar_fractions, axis=1), 1.0, rtol=1e-5):
             raise ValueError('The sum of molar fractions must be close to 1.0')
-        
-        if molar_fractions_all.shape[1] != len(smiles_list):
+        elif molar_fractions.shape[1] != len(smiles_list):
             raise ValueError(
-                f'Number of components in molar_fractions_all ({molar_fractions_all.shape[1]}) '
+                f'Number of components in molar_fractions ({molar_fractions.shape[1]}) '
                 f'must match number of SMILES ({len(smiles_list)})'
             )
 
         # Get scaled inputs
         scaled_T = self._get_scaled_temperature(temperature)
+        scaled_embeddings = self._get_scaled_embeddings_from_smiles(smiles_list)
+
+        # Prepare tensors for model
+        batch_size = len(molar_fractions)
+        temperature_tensor = scaled_T.repeat(batch_size, 1).to(self.device)
+        x_values_tensor = torch.FloatTensor(molar_fractions[:, :-1]).to(self.device)
+        embedding_tensor = (
+            torch.stack(scaled_embeddings)
+            .repeat(batch_size, 1, 1)
+            .to(self.device)
+        )
+
+        # Make prediction
+        ln_gammas, gE = self.model(temperature_tensor, x_values_tensor, embedding_tensor)
+        ln_gammas = ln_gammas.detach().cpu().numpy()
+        gE = gE.detach().cpu().numpy()
+
+        if verbose:
+            print('\n' + '#'*60)
+            print("Predictions for system", "-".join(smiles_list))
+            print("Temperature:", f"{temperature} K")
+
+            for i, molar_fraction in enumerate(molar_fractions):
+                print(f"\nComposition {i+1} :", molar_fraction)
+                print(f"\tLogarithmic activity coefficients:")
+                for smiles, ln_gamma in zip(smiles_list, ln_gammas[i]):
+                    print(f"\t\t{smiles}: {ln_gamma:.2f}")
+                print(f"\n\tExcess Gibbs energy:")
+                print(f"\t\tg^E/RT = {gE[i]:.2f}")
+            print('#'*60 + '\n')
+
+        return ln_gammas, gE
+    
+    def predict_over_composition(
+        self, 
+        smiles_list: List[str], 
+        temperature: float,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Predict activity coefficients and excess Gibbs energy.
+        
+        Args:
+            smiles_list: List of SMILES strings for each component.
+            temperature: Temperature in Kelvin.
+            
+        Returns:
+            Tuple of (molar_fractions_all, ln_gammas, gE_over_RT, hE) as numpy arrays.
+            
+        Raises:
+            ValueError: If molar fractions don't sum to 1 or have invalid dimensions.
+        """
+   
+        num_components = len(smiles_list)
+        if num_components == 2:
+            molar_fractions_all = np.array([[x, 1-x] for x in np.linspace(0, 1, 101)])
+        elif num_components == 3:
+            molar_fractions_all = []
+            for x1 in np.linspace(0, 1, 21):
+                for x2 in np.linspace(0, 1-x1, 21):
+                    x3 = 1 - x1 - x2
+                    molar_fractions_all.append([x1, x2, x3])
+        else:
+            raise ValueError('Only binary and ternary systems are supported for "all" compositions.')
+        
+        molar_fractions_all = np.array(molar_fractions_all)
+
+        # Get scaled inputs
+        scaled_T = self._get_scaled_temperature(temperature).requires_grad_(True)  # Enable gradient tracking for temperature
         scaled_embeddings = self._get_scaled_embeddings_from_smiles(smiles_list)
 
         # Prepare tensors for model
@@ -149,23 +216,31 @@ class HANNA_Predictor:
         )
 
         # Make prediction
-        ln_gammas, gE = self.model(temperature_tensor, x_values_tensor, embedding_tensor)
+        ln_gammas, gE_over_RT = self.model(temperature_tensor, x_values_tensor, embedding_tensor)
 
+         # Compute derivative d(gE/RT)/dT_scaled using autograd
+        d_gE_over_RT_dT_scaled = torch.autograd.grad(
+            outputs=gE_over_RT.sum(),
+            inputs=temperature_tensor,
+            create_graph=True,  # Allow gradient flow through this operation
+            retain_graph=True
+        )[0].squeeze()  # Shape [B_he]
+        
+        # get standard deviation from the temperature scaler for unscaling the derivative
+        temperature_std = torch.tensor(self.t_scaler.scale_, dtype=torch.float32, device=self.device) 
+
+        # Apply chain rule: d(gE/RT)/dT = d(gE/RT)/dT_scaled * (1/std_dev)
+        d_gE_over_RT_dT = d_gE_over_RT_dT_scaled / temperature_std
+        
+        # Calculate hE = -R * T^2 * d(gE/RT)/dT (Gibbs-Helmholtz equation)
+        # R = 8.314 J/(mol·K) = 0.008314 kJ/(mol·K), temp_he is scaled, so unscale it
+        R = 0.008314  # kJ/(mol·K)
+        hE = -R * temperature**2 * d_gE_over_RT_dT
+
+        hE = hE.detach().cpu().numpy()
         ln_gammas = ln_gammas.detach().cpu().numpy()
-        gE = gE.detach().cpu().numpy()
+        gE_over_RT = gE_over_RT.detach().cpu().numpy()
 
-        if verbose:
-            print('\n' + '#'*60)
-            print("Predictions for system", "-".join(smiles_list))
-            print("Temperature:", f"{temperature} K")
 
-            for i, molar_fraction in enumerate(molar_fractions_all):
-                print(f"\nComposition {i+1} :", molar_fraction)
-                print(f"\tLogarithmic activity coefficients:")
-                for smiles, ln_gamma in zip(smiles_list, ln_gammas[i]):
-                    print(f"\t\t{smiles}: {ln_gamma:.2f}")
-                print(f"\n\tExcess Gibbs energy:")
-                print(f"\t\tg^E/RT = {gE[i]:.2f}")
-            print('#'*60 + '\n')
 
-        return ln_gammas, gE
+        return molar_fractions_all, ln_gammas, gE_over_RT, hE
